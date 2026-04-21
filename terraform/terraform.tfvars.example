@@ -18,6 +18,12 @@ glue_crawler_schedule = "cron(0 2 * * ? *)"
 # Identity Store ID for username lookup (required — from IAM Identity Center)
 identity_store_id = "d-xxxxxxxxxx"
 
+# CUR v2 Integration (optional — leave empty to skip)
+# Set this to your CUR v2 S3 bucket/prefix to enable actual dollar cost tracking
+# Requires: CUR v2 data export with "Include resource IDs" enabled in AWS Billing
+# Example: "my-cur-bucket/cur-reports"
+cur_s3_bucket_name = ""
+
 # Tags
 tags = {
   Project     = "Kiro User Report"

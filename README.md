@@ -59,6 +59,7 @@ Edit `terraform/terraform.tfvars` with your values:
 | `glue_crawler_schedule` | No | Cron schedule for the Glue crawler |
 | `identity_store_id` | Yes | IAM Identity Center Identity Store ID (e.g. `d-1234567890`) for resolving user IDs to usernames |
 | `project_name` | No | Prefix for resource naming |
+| `cur_s3_bucket_name` | No | S3 bucket/prefix for CUR v2 data (enables dollar cost tracking). See [CUR_SETUP_GUIDE.md](CUR_SETUP_GUIDE.md) |
 | `tags` | No | Tags applied to all resources |
 
 The S3 data path is constructed automatically as:
@@ -105,10 +106,28 @@ The dashboard expects Kiro user report CSV data with these columns:
 - Daily Activity Trends — messages, conversations, credits, active users over time
 - Daily Trends by Client Type — per-client daily line charts
 - Credits Analysis — top users by credits, base vs overage split
+- **Cost Analysis** — actual billed costs (via CUR) and estimated costs from credit usage
 - Subscription Tier Breakdown — users and credits by tier
 - User Engagement — segmentation (Power / Active / Light / Idle)
 - User Activity Timeline — recency, active days, filterable detail table
 - Engagement Funnel — conversion rates across engagement stages
+
+## 💵 CUR Integration (Optional)
+
+To show actual dollar costs per user (not just credit counts), you can connect AWS Cost and Usage Report (CUR 2.0) data. This requires a CUR export with **Include resource IDs** enabled.
+
+See **[CUR_SETUP_GUIDE.md](CUR_SETUP_GUIDE.md)** for full setup instructions, including:
+- Creating a new CUR 2.0 export via CLI or console
+- What to do if you already have a CUR export without resource IDs
+- Migrating from legacy CUR
+- S3 bucket policy requirements
+
+Quick version: set `cur_s3_bucket_name` in `terraform.tfvars` and re-run `deploy.sh`.
+
+![Cost Analysis — CUR](images/cost-analysis-cur-billed.png)
+![Cost Analysis — Estimated](images/cost-analysis-estimated.png)
+
+> **Note:** Cost Analysis screenshots are placeholders — replace with actual dashboard captures after deployment.
 
 ## Project Structure
 
@@ -128,6 +147,18 @@ The dashboard expects Kiro user report CSV data with these columns:
 ```
 
 ## Security
+
+The dashboard is read-only — it queries Kiro user report and CUR data via Athena but cannot modify any source data.
+
+**Who can access the dashboard:**
+- The dashboard runs locally or on infrastructure you control. There is no built-in authentication.
+- Access is determined by who can reach the Streamlit URL (`http://localhost:8501` by default).
+- The underlying data queries require AWS credentials with the IAM policy created by Terraform, which only grants read access to the Athena workgroup, Glue catalog, and S3 data buckets in the management account.
+
+**For management account view-only access:**
+- Run the dashboard on an EC2 instance or ECS task in the management account using the `app_role` IAM role provisioned by Terraform.
+- Restrict network access via security groups to your VPN or internal network.
+- Users viewing the dashboard do not need AWS credentials — the app handles all AWS calls server-side with its own IAM role.
 
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
 

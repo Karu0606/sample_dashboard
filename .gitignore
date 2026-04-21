@@ -1,0 +1,17 @@
+# Python
+app/venv/
+__pycache__/
+*.pyc
+
+# Environment
+app/.env
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/.terraform.lock.hcl
+terraform/terraform.tfvars
+
+# macOS
+.DS_Store

@@ -18,7 +18,9 @@ provider "aws" {
 locals {
   s3_data_path = "${var.s3_bucket_name}/AWSLogs/${var.aws_account_id}/KiroLogs/user_report/${var.aws_region}"
   # Extract the actual bucket name (before the first slash) for ARN-based policies
-  s3_bucket_only = split("/", var.s3_bucket_name)[0]
+  s3_bucket_only   = split("/", var.s3_bucket_name)[0]
+  cur_enabled      = var.cur_s3_bucket_name != ""
+  cur_bucket_only  = local.cur_enabled ? split("/", var.cur_s3_bucket_name)[0] : ""
 }
 
 # S3 Bucket for Athena query results
@@ -292,4 +294,114 @@ resource "aws_iam_user" "app_user" {
 resource "aws_iam_user_policy_attachment" "app_user_athena_access" {
   user       = aws_iam_user.app_user.name
   policy_arn = aws_iam_policy.athena_access_policy.arn
+}
+
+
+# ─── CUR v2 Integration (optional) ───────────────────────────────────────────
+
+# Glue Database for CUR data
+resource "aws_glue_catalog_database" "cur_db" {
+  count       = local.cur_enabled ? 1 : 0
+  name        = var.cur_glue_database_name
+  description = "Database for AWS CUR v2 data (Kiro cost analysis)"
+}
+
+# IAM policy for CUR S3 access
+resource "aws_iam_role_policy" "glue_cur_s3_policy" {
+  count = local.cur_enabled ? 1 : 0
+  name  = "${var.project_name}-glue-cur-s3-policy"
+  role  = aws_iam_role.glue_crawler_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::${local.cur_bucket_only}",
+          "arn:aws:s3:::${var.cur_s3_bucket_name}/*"
+        ]
+      }
+    ]
+  })
+}
+
+# Glue Crawler for CUR data
+resource "aws_glue_crawler" "cur_crawler" {
+  count         = local.cur_enabled ? 1 : 0
+  name          = "${var.project_name}-cur-crawler"
+  role          = aws_iam_role.glue_crawler_role.arn
+  database_name = aws_glue_catalog_database.cur_db[0].name
+
+  s3_target {
+    path = "s3://${var.cur_s3_bucket_name}/"
+  }
+
+  schema_change_policy {
+    delete_behavior = "LOG"
+    update_behavior = "UPDATE_IN_DATABASE"
+  }
+
+  configuration = jsonencode({
+    Version = 1.0
+    CrawlerOutput = {
+      Partitions = { AddOrUpdateBehavior = "InheritFromTable" }
+    }
+  })
+
+  schedule = var.glue_crawler_schedule
+}
+
+# Extend Athena access policy for CUR database
+resource "aws_iam_policy" "cur_athena_access_policy" {
+  count       = local.cur_enabled ? 1 : 0
+  name        = "${var.project_name}-cur-athena-access"
+  description = "Policy for accessing CUR data via Athena"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "glue:GetDatabase",
+          "glue:GetTable",
+          "glue:GetTables",
+          "glue:GetPartitions"
+        ]
+        Resource = [
+          "arn:aws:glue:${var.aws_region}:*:catalog",
+          "arn:aws:glue:${var.aws_region}:*:database/${var.cur_glue_database_name}",
+          "arn:aws:glue:${var.aws_region}:*:table/${var.cur_glue_database_name}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::${local.cur_bucket_only}",
+          "arn:aws:s3:::${var.cur_s3_bucket_name}/*"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "app_role_cur_access" {
+  count      = local.cur_enabled ? 1 : 0
+  role       = aws_iam_role.app_role.name
+  policy_arn = aws_iam_policy.cur_athena_access_policy[0].arn
+}
+
+resource "aws_iam_user_policy_attachment" "app_user_cur_access" {
+  count      = local.cur_enabled ? 1 : 0
+  user       = aws_iam_user.app_user.name
+  policy_arn = aws_iam_policy.cur_athena_access_policy[0].arn
 }

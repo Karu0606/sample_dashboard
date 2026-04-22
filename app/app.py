@@ -307,13 +307,17 @@ def main():
         # ── Global User Filter ──
         query_all_users = f"SELECT DISTINCT userid FROM {table_name} ORDER BY userid"
         df_all_users = fetch_data(query_all_users)
-        df_all_users['userid'] = df_all_users['userid'].str.replace("'", "").str.replace('"', '')
-        all_userids = df_all_users['userid'].tolist()
-        all_umap = get_usernames_batch(all_userids)
-        # Build display label -> userid mapping
-        user_options = {all_umap.get(uid, uid): uid for uid in all_userids}
+        # Keep raw userids for SQL filtering, clean copies for display/lookup
+        raw_userids = df_all_users['userid'].tolist()
+        cleaned_userids = df_all_users['userid'].str.replace("'", "").str.replace('"', '').tolist()
+        all_umap = get_usernames_batch(cleaned_userids)
+        # Build display label -> raw userid mapping (raw IDs match DB values)
+        user_options = {}
+        for raw, clean in zip(raw_userids, cleaned_userids):
+            label = all_umap.get(clean, clean)
+            user_options[label] = raw
 
-        st.markdown("### 🔍 User Filter")
+        st.header("🔍 User Filter")
         filter_col_a, filter_col_b = st.columns([5, 1])
         with filter_col_a:
             selected_labels = st.multiselect(
@@ -323,7 +327,7 @@ def main():
                 help="Filter all dashboard sections by selected users"
             )
         with filter_col_b:
-            st.markdown("")  # spacing
+            st.markdown("<div style='margin-top: 1.7rem;'></div>", unsafe_allow_html=True)
             if st.button("Clear Filter"):
                 st.session_state['user_filter'] = []
                 st.rerun()

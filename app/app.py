@@ -1,4 +1,6 @@
 import os
+import io
+import base64
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -138,17 +140,23 @@ def resolve_table_name():
     raise Exception(f"No tables found in Glue database '{ATHENA_DATABASE}'. "
                     "Run the Glue crawler first, or set GLUE_TABLE_NAME in .env.")
 
-@st.cache_data(ttl=3600)
 def get_username(userid):
+    """Resolve userid to username via Identity Store.
+    Successful lookups are cached; failures fall back to raw userid without caching."""
     if not IDENTITY_STORE_ID:
         return userid
     try:
-        client = get_identity_store_client()
-        response = client.describe_user(IdentityStoreId=IDENTITY_STORE_ID, UserId=userid)
-        return response.get('UserName') or response.get('DisplayName') or \
-               response.get('Emails', [{}])[0].get('Value') or userid
+        return _resolve_username_cached(userid)
     except Exception:
         return userid
+
+@st.cache_data(ttl=3600)
+def _resolve_username_cached(userid):
+    """Cached username lookup. Raises on failure so failed results are NOT cached."""
+    client = get_identity_store_client()
+    response = client.describe_user(IdentityStoreId=IDENTITY_STORE_ID, UserId=userid)
+    return response.get('UserName') or response.get('DisplayName') or \
+           response.get('Emails', [{}])[0].get('Value') or userid
 
 @st.cache_data(ttl=3600)
 def get_usernames_batch(userids):
@@ -235,6 +243,39 @@ def safe_int(val, default=0):
     except (ValueError, TypeError):
         return default
 
+def build_user_filter_clause(selected_userids):
+    """Build a SQL WHERE clause fragment for user filtering.
+    Returns empty string if no filter is applied."""
+    if not selected_userids:
+        return ""
+    escaped = [uid.replace("'", "''") for uid in selected_userids]
+    in_list = ", ".join(f"'{uid}'" for uid in escaped)
+    return f" AND userid IN ({in_list})"
+
+def generate_export_html(figures, title="Kiro Users Report"):
+    """Generate a self-contained HTML file with all Plotly charts."""
+    charts_html = ""
+    for fig_name, fig in figures:
+        charts_html += f'<h2>{fig_name}</h2>\n'
+        charts_html += fig.to_html(full_html=False, include_plotlyjs=False)
+        charts_html += '\n<hr>\n'
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>{title}</title>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<style>
+body {{ font-family: Inter, system-ui, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; }}
+h1 {{ color: #1f2937; }} h2 {{ color: #374151; margin-top: 2rem; }}
+hr {{ border: none; border-top: 1px solid #e5e7eb; margin: 2rem 0; }}
+.meta {{ color: #6b7280; font-size: 0.9rem; }}
+</style></head><body>
+<h1>⚡ {title}</h1>
+<p class="meta">Exported on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+<hr>
+{charts_html}
+</body></html>"""
+    return html
+
 # --- Main app ---
 
 def main():
@@ -255,9 +296,50 @@ def main():
     if refresh:
         st.cache_data.clear()
 
+    # Collection for export
+    export_figures = []
+    export_dataframes = {}
+
     try:
         # Auto-discover table name from Glue database
         table_name = resolve_table_name()
+
+        # ── Global User Filter ──
+        query_all_users = f"SELECT DISTINCT userid FROM {table_name} ORDER BY userid"
+        df_all_users = fetch_data(query_all_users)
+        # Keep raw userids for SQL filtering, clean copies for display/lookup
+        raw_userids = df_all_users['userid'].tolist()
+        cleaned_userids = df_all_users['userid'].str.replace("'", "").str.replace('"', '').tolist()
+        all_umap = get_usernames_batch(cleaned_userids)
+        # Build display label -> raw userid mapping (raw IDs match DB values)
+        user_options = {}
+        for raw, clean in zip(raw_userids, cleaned_userids):
+            label = all_umap.get(clean, clean)
+            user_options[label] = raw
+
+        st.header("🔍 User Filter")
+        filter_col_a, filter_col_b = st.columns([5, 1])
+        with filter_col_a:
+            selected_labels = st.multiselect(
+                "Select users to filter (leave empty for all users)",
+                options=sorted(user_options.keys()),
+                default=[],
+                help="Filter all dashboard sections by selected users"
+            )
+        with filter_col_b:
+            st.markdown("<div style='margin-top: 1.7rem;'></div>", unsafe_allow_html=True)
+            if st.button("Clear Filter"):
+                st.session_state['user_filter'] = []
+                st.rerun()
+
+        selected_userids = [user_options[label] for label in selected_labels]
+        user_filter_sql = build_user_filter_clause(selected_userids)
+        filter_active = len(selected_userids) > 0
+
+        if filter_active:
+            st.info(f"🔍 Filtering by {len(selected_userids)} user(s): {', '.join(selected_labels)}")
+
+        st.markdown("---")
         with st.expander("ℹ️ Metric Definitions", expanded=False):
             st.markdown("""
             **Date**: Date of the report activity.
@@ -298,6 +380,7 @@ def main():
             SUM(TRY_CAST(credits_used AS DOUBLE)) as total_credits,
             SUM(TRY_CAST(overage_credits_used AS DOUBLE)) as total_overage
         FROM {table_name}
+        WHERE 1=1{user_filter_sql}
         """
         df_overall = fetch_data(query_overall)
 
@@ -331,6 +414,7 @@ def main():
             SUM(TRY_CAST(chat_conversations AS INTEGER)) as total_conversations,
             SUM(TRY_CAST(credits_used AS DOUBLE)) as total_credits
         FROM {table_name}
+        WHERE 1=1{user_filter_sql}
         GROUP BY client_type
         ORDER BY total_messages DESC
         """
@@ -350,6 +434,7 @@ def main():
                                          pull=[0.03] * len(df_client))
             apply_chart_theme(fig_client_pie)
             st.plotly_chart(fig_client_pie, use_container_width=True)
+            export_figures.append(('Messages by Client Type', fig_client_pie))
 
         with col2:
             fig_client_bar = px.bar(
@@ -364,6 +449,7 @@ def main():
             fig_client_bar.update_layout(showlegend=False, bargap=0.4)
             apply_chart_theme(fig_client_bar)
             st.plotly_chart(fig_client_bar, use_container_width=True)
+            export_figures.append(('Credits Used by Client Type', fig_client_bar))
 
         st.markdown("---")
 
@@ -377,6 +463,7 @@ def main():
             SUM(TRY_CAST(chat_conversations AS INTEGER)) as total_conversations,
             SUM(TRY_CAST(credits_used AS DOUBLE)) as total_credits
         FROM {table_name}
+        WHERE 1=1{user_filter_sql}
         GROUP BY userid
         ORDER BY total_messages DESC
         LIMIT 10
@@ -410,6 +497,7 @@ def main():
             fig_top.update_layout(xaxis_tickangle=-45, showlegend=False, height=400, coloraxis_showscale=False)
             apply_chart_theme(fig_top)
             st.plotly_chart(fig_top, use_container_width=True)
+            export_figures.append(('Top Users by Messages', fig_top))
 
         st.markdown("---")
 
@@ -424,6 +512,7 @@ def main():
             SUM(TRY_CAST(credits_used AS DOUBLE)) as credits,
             COUNT(DISTINCT userid) as active_users
         FROM {table_name}
+        WHERE 1=1{user_filter_sql}
         GROUP BY date
         ORDER BY date
         """
@@ -463,6 +552,7 @@ def main():
                                 title=dict(text="Daily Activity Overview", x=0.5, xanchor='center'))
         apply_chart_theme(fig_daily)
         st.plotly_chart(fig_daily, use_container_width=True)
+        export_figures.append(('Daily Activity Overview', fig_daily))
 
         st.markdown("---")
 
@@ -476,6 +566,7 @@ def main():
             SUM(TRY_CAST(total_messages AS INTEGER)) as messages,
             SUM(TRY_CAST(chat_conversations AS INTEGER)) as conversations
         FROM {table_name}
+        WHERE 1=1{user_filter_sql}
         GROUP BY date, client_type
         ORDER BY date
         """
@@ -495,6 +586,7 @@ def main():
             fig_msg_client.update_traces(line=dict(width=2.5), marker=dict(size=5))
             apply_chart_theme(fig_msg_client)
             st.plotly_chart(fig_msg_client, use_container_width=True)
+            export_figures.append(('Daily Messages by Client Type', fig_msg_client))
 
         with col2:
             fig_conv_client = px.line(
@@ -506,6 +598,7 @@ def main():
             fig_conv_client.update_traces(line=dict(width=2.5), marker=dict(size=5))
             apply_chart_theme(fig_conv_client)
             st.plotly_chart(fig_conv_client, use_container_width=True)
+            export_figures.append(('Daily Conversations by Client Type', fig_conv_client))
 
         st.markdown("---")
 
@@ -520,6 +613,7 @@ def main():
             MAX(TRY_CAST(overage_cap AS DOUBLE)) as overage_cap,
             MAX(overage_enabled) as overage_enabled
         FROM {table_name}
+        WHERE 1=1{user_filter_sql}
         GROUP BY userid
         ORDER BY total_credits DESC
         """
@@ -545,6 +639,7 @@ def main():
             fig_credits.update_layout(xaxis_tickangle=-45, showlegend=False, coloraxis_showscale=False)
             apply_chart_theme(fig_credits)
             st.plotly_chart(fig_credits, use_container_width=True)
+            export_figures.append(('Top 15 Users by Total Credits', fig_credits))
 
         with col2:
             # Credits vs overage — credits_used is base plan, overage_credits_used is additional
@@ -564,6 +659,7 @@ def main():
                                        pull=[0.03, 0.03])
             apply_chart_theme(fig_overage)
             st.plotly_chart(fig_overage, use_container_width=True)
+            export_figures.append(('Base vs Overage Credits', fig_overage))
 
         # Monthly credit usage by user table
         st.subheader("📅 Credit Usage by User by Month")
@@ -574,6 +670,7 @@ def main():
             DATE_FORMAT(DATE_PARSE(date, '%Y-%m-%d'), '%Y-%m') as month,
             SUM(TRY_CAST(credits_used AS DOUBLE)) as credits_used
         FROM {table_name}
+        WHERE 1=1{user_filter_sql}
         GROUP BY userid, DATE_FORMAT(DATE_PARSE(date, '%Y-%m-%d'), '%Y-%m')
         ORDER BY month, userid
         """
@@ -598,6 +695,7 @@ def main():
         df_pivot = df_pivot.round(1)
 
         st.dataframe(df_pivot, use_container_width=True, height=400)
+        export_dataframes['credit_usage_by_month'] = df_pivot.reset_index()
 
         st.markdown("---")
 
@@ -878,6 +976,7 @@ def main():
             SUM(TRY_CAST(total_messages AS INTEGER)) as total_messages,
             SUM(TRY_CAST(credits_used AS DOUBLE)) as total_credits
         FROM {table_name}
+        WHERE 1=1{user_filter_sql}
         GROUP BY subscription_tier
         ORDER BY total_messages DESC
         """
@@ -898,6 +997,7 @@ def main():
             fig_tier_users.update_layout(showlegend=False, bargap=0.4)
             apply_chart_theme(fig_tier_users)
             st.plotly_chart(fig_tier_users, use_container_width=True)
+            export_figures.append(('Users by Subscription Tier', fig_tier_users))
 
         with col2:
             fig_tier_credits = px.bar(
@@ -910,6 +1010,7 @@ def main():
             fig_tier_credits.update_layout(showlegend=False, bargap=0.4)
             apply_chart_theme(fig_tier_credits)
             st.plotly_chart(fig_tier_credits, use_container_width=True)
+            export_figures.append(('Credits by Subscription Tier', fig_tier_credits))
 
         st.markdown("---")
 
@@ -923,6 +1024,7 @@ def main():
             SUM(TRY_CAST(chat_conversations AS INTEGER)) as total_conversations,
             SUM(TRY_CAST(credits_used AS DOUBLE)) as total_credits
         FROM {table_name}
+        WHERE 1=1{user_filter_sql}
         GROUP BY userid
         ORDER BY total_messages DESC
         """
@@ -969,6 +1071,7 @@ def main():
                                   legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.05))
             apply_chart_theme(fig_seg)
             st.plotly_chart(fig_seg, use_container_width=True)
+            export_figures.append(('User Engagement Segmentation', fig_seg))
 
         with col2:
             st.markdown("### Category Definitions")
@@ -1003,6 +1106,7 @@ def main():
             MIN(date) as first_active_date,
             COUNT(DISTINCT date) as active_days
         FROM {table_name}
+        WHERE 1=1{user_filter_sql}
         GROUP BY userid
         """
         df_activity = fetch_data(query_activity)
@@ -1033,6 +1137,7 @@ def main():
             fig_last.update_layout(height=500, yaxis={'categoryorder': 'total ascending'}, coloraxis_showscale=False)
             apply_chart_theme(fig_last)
             st.plotly_chart(fig_last, use_container_width=True)
+            export_figures.append(('Days Since Last Activity', fig_last))
 
         with col2:
             df_most = df_act_merged.nlargest(15, 'active_days')
@@ -1046,6 +1151,7 @@ def main():
             fig_days.update_layout(height=500, yaxis={'categoryorder': 'total ascending'}, coloraxis_showscale=False)
             apply_chart_theme(fig_days)
             st.plotly_chart(fig_days, use_container_width=True)
+            export_figures.append(('Total Active Days', fig_days))
 
         # Detailed table
         st.markdown("#### 📋 Detailed User Activity Table")
@@ -1093,6 +1199,7 @@ def main():
             st.metric("Active Last Week", len(df_f[df_f['Days Ago'] <= 7]))
 
         st.dataframe(df_f, use_container_width=True, height=400, hide_index=True)
+        export_dataframes['user_activity_detail'] = df_f
 
         st.markdown("---")
 
@@ -1125,6 +1232,7 @@ def main():
                                      margin=dict(l=20, r=20, t=60, b=20))
             apply_chart_theme(fig_funnel)
             st.plotly_chart(fig_funnel, use_container_width=True)
+            export_figures.append(('User Engagement Funnel', fig_funnel))
 
         with col2:
             st.subheader("📊 Funnel Metrics")
@@ -1142,6 +1250,60 @@ def main():
                     st.markdown(f"**Active Retention:** {active_users / users_with_messages * 100:.1f}%")
                 if active_users > 0:
                     st.markdown(f"**Power User Growth:** {power_users / active_users * 100:.1f}%")
+
+        # ── Export Section ──
+        st.markdown("---")
+        st.header("📥 Export Report")
+
+        export_col1, export_col2, export_col3 = st.columns(3)
+
+        with export_col1:
+            # Export all charts as HTML
+            if export_figures:
+                filter_label = f" ({', '.join(selected_labels)})" if filter_active else ""
+                html_content = generate_export_html(
+                    export_figures,
+                    title=f"Kiro Users Report{filter_label}"
+                )
+                st.download_button(
+                    label="📊 Download Charts (HTML)",
+                    data=html_content,
+                    file_name=f"kiro_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                    mime="text/html",
+                    help="Download all charts as an interactive HTML file"
+                )
+
+        with export_col2:
+            # Export CSV data
+            if export_dataframes:
+                csv_buffer = io.BytesIO()
+                with pd.ExcelWriter(csv_buffer, engine='openpyxl') as writer:
+                    for sheet_name, df_export in export_dataframes.items():
+                        df_export.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+                st.download_button(
+                    label="📋 Download Data (Excel)",
+                    data=csv_buffer.getvalue(),
+                    file_name=f"kiro_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.document",
+                    help="Download data tables as Excel file"
+                )
+
+        with export_col3:
+            # Export raw CSV for all key metrics
+            all_csv_parts = []
+            for name, df_export in export_dataframes.items():
+                all_csv_parts.append(f"# {name}")
+                all_csv_parts.append(df_export.to_csv(index=False))
+                all_csv_parts.append("")
+            if all_csv_parts:
+                csv_content = "\n".join(all_csv_parts)
+                st.download_button(
+                    label="📄 Download Data (CSV)",
+                    data=csv_content,
+                    file_name=f"kiro_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    help="Download data tables as CSV file"
+                )
 
     except Exception as e:
         st.error(f"Error fetching data: {str(e)}")

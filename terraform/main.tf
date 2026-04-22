@@ -23,7 +23,7 @@ locals {
 
 # S3 Bucket for Athena query results
 resource "aws_s3_bucket" "athena_results" {
-  bucket = "${var.project_name}-athena-results"
+  bucket = "${var.project_name}-athena-results-${var.aws_account_id}"
   
   #tags = merge(var.tags, {
   #  Name = "${var.project_name}-athena-results"

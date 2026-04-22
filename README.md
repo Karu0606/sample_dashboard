@@ -72,7 +72,7 @@ s3://{s3_bucket_name}/AWSLogs/{aws_account_id}/KiroLogs/user_report/{aws_region}
 
 1. Runs `terraform init` and `terraform apply` to provision:
    - Glue database, crawler, and IAM role
-   - Athena workgroup and results S3 bucket
+   - Athena workgroup and results S3 bucket (bucket name includes account ID suffix to ensure global uniqueness)
    - IAM policies for app access
 2. Generates `app/.env` from Terraform outputs
 3. Starts the Glue crawler and waits for it to finish
@@ -109,6 +109,8 @@ The dashboard expects Kiro user report CSV data with these columns:
 - User Engagement — segmentation (Power / Active / Light / Idle)
 - User Activity Timeline — recency, active days, filterable detail table
 - Engagement Funnel — conversion rates across engagement stages
+- User Filtering — filter dashboard data by specific users or user groups
+- Data Export — export filtered data and charts to CSV for offline analysis
 
 ## Project Structure
 

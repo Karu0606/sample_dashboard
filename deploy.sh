@@ -57,6 +57,17 @@ ATHENA_OUTPUT_BUCKET=${ATHENA_OUTPUT}
 IDENTITY_STORE_ID=${IDENTITY_STORE_ID}
 EOF
 
+# Add CUR config if enabled
+CUR_ENABLED=$(terraform -chdir=terraform output -raw cur_enabled 2>/dev/null || echo "false")
+if [ "$CUR_ENABLED" = "true" ]; then
+    CUR_DATABASE=$(terraform -chdir=terraform output -raw cur_glue_database_name)
+    cat >> app/.env << EOF
+CUR_DATABASE=${CUR_DATABASE}
+CUR_ENABLED=true
+EOF
+    echo "✅ CUR integration enabled"
+fi
+
 echo "✅ Created app/.env"
 cat app/.env
 
@@ -65,16 +76,31 @@ echo ""
 echo "🕷️  Step 4: Running Glue crawler"
 
 CRAWLER_NAME=$(terraform -chdir=terraform output -raw glue_crawler_name)
-aws glue start-crawler --name "${CRAWLER_NAME}"
+aws glue start-crawler --name "${CRAWLER_NAME}" --region "${AWS_REGION}"
 
 echo "Waiting for crawler to finish (may take a few minutes)..."
 while true; do
-    STATUS=$(aws glue get-crawler --name "${CRAWLER_NAME}" --query 'Crawler.State' --output text)
+    STATUS=$(aws glue get-crawler --name "${CRAWLER_NAME}" --region "${AWS_REGION}" --query 'Crawler.State' --output text)
     if [ "$STATUS" = "READY" ]; then break; fi
     echo "  Crawler status: $STATUS"
     sleep 10
 done
 echo "✅ Crawler completed"
+
+# Run CUR crawler if enabled
+if [ "$CUR_ENABLED" = "true" ]; then
+    echo ""
+    echo "🕷️  Running CUR Glue crawler..."
+    CUR_CRAWLER_NAME="${CRAWLER_NAME%-crawler}-cur-crawler"
+    aws glue start-crawler --name "${CUR_CRAWLER_NAME}" --region "${AWS_REGION}" 2>/dev/null || true
+    while true; do
+        CUR_STATUS=$(aws glue get-crawler --name "${CUR_CRAWLER_NAME}" --region "${AWS_REGION}" --query 'Crawler.State' --output text 2>/dev/null || echo "READY")
+        if [ "$CUR_STATUS" = "READY" ]; then break; fi
+        echo "  CUR crawler status: $CUR_STATUS"
+        sleep 10
+    done
+    echo "✅ CUR crawler completed"
+fi
 
 # ── Step 5: Launch dashboard ──
 echo ""

@@ -699,6 +699,273 @@ def main():
 
         st.markdown("---")
 
+        # ── Cost Analysis ──
+        st.header("💵 Cost Analysis")
+
+        from config import CUR_ENABLED, CUR_DATABASE, TIER_PRICING, OVERAGE_COST_PER_CREDIT
+
+        if CUR_ENABLED and CUR_DATABASE:
+            # ── CUR-based actual billing data ──
+            st.subheader("📊 Actual Billed Costs (from AWS CUR)")
+
+            # Auto-discover CUR table name
+            @st.cache_data(ttl=3600)
+            def resolve_cur_table_name():
+                try:
+                    client = get_glue_client()
+                    response = client.get_tables(DatabaseName=CUR_DATABASE, MaxResults=10)
+                    tables = response.get('TableList', [])
+                    for t in tables:
+                        if t['Name'] not in ('cost_and_usage_data_status',):
+                            return t['Name']
+                except Exception:
+                    pass
+                return None
+
+            cur_table = resolve_cur_table_name()
+
+            if cur_table:
+                # Total Kiro spend from CUR
+                query_cur_total = f"""
+                SELECT
+                    line_item_usage_account_id as account_id,
+                    bill_billing_period_start_date as billing_period,
+                    SUM(line_item_unblended_cost) as total_cost,
+                    SUM(line_item_blended_cost) as blended_cost,
+                    line_item_resource_id as resource_id
+                FROM {CUR_DATABASE}."{cur_table}"
+                WHERE line_item_product_code = 'Kiro'
+                GROUP BY line_item_usage_account_id,
+                         bill_billing_period_start_date,
+                         line_item_resource_id
+                ORDER BY billing_period DESC
+                """
+                try:
+                    df_cur = fetch_data(query_cur_total)
+                    df_cur['total_cost'] = df_cur['total_cost'].apply(safe_float)
+                    df_cur['blended_cost'] = df_cur['blended_cost'].apply(safe_float)
+
+                    if df_cur.empty or df_cur['total_cost'].sum() == 0:
+                        st.info(
+                            "📭 No Kiro billing line items found in this CUR data. "
+                            "This typically means Kiro charges are billed to a different payer/management account. "
+                            "Request CUR data from your organization's payer account, or use the "
+                            "**Estimated Costs** section below which calculates costs from credit usage."
+                        )
+                    else:
+                        # Resolve resource_id to username where possible
+                        if 'resource_id' in df_cur.columns:
+                            cur_umap = get_usernames_batch(df_cur['resource_id'].unique().tolist())
+                            df_cur['user'] = df_cur['resource_id'].map(cur_umap)
+
+                        total_billed = df_cur['total_cost'].sum()
+
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Total Billed (Unblended)", f"${total_billed:,.2f}",
+                                      help="Actual unblended cost from AWS CUR")
+                        with col2:
+                            st.metric("Total Billed (Blended)", f"${df_cur['blended_cost'].sum():,.2f}",
+                                      help="Blended cost from AWS CUR")
+                        with col3:
+                            unique_periods = df_cur['billing_period'].nunique() if 'billing_period' in df_cur.columns else 1
+                            st.metric("Billing Periods", unique_periods)
+
+                        # Monthly cost trend from CUR
+                        query_cur_monthly = f"""
+                        SELECT
+                            DATE_FORMAT(bill_billing_period_start_date, '%Y-%m') as month,
+                            SUM(line_item_unblended_cost) as total_cost,
+                            COUNT(DISTINCT line_item_resource_id) as user_count
+                        FROM {CUR_DATABASE}."{cur_table}"
+                        WHERE line_item_product_code = 'Kiro'
+                        GROUP BY DATE_FORMAT(bill_billing_period_start_date, '%Y-%m')
+                        ORDER BY month
+                        """
+                        df_cur_monthly = fetch_data(query_cur_monthly)
+                        df_cur_monthly['total_cost'] = df_cur_monthly['total_cost'].apply(safe_float)
+                        df_cur_monthly['user_count'] = df_cur_monthly['user_count'].apply(safe_int)
+
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            fig_cur_trend = px.bar(
+                                df_cur_monthly, x='month', y='total_cost',
+                                title='Monthly Kiro Spend (CUR)',
+                                color='total_cost', color_continuous_scale='Reds',
+                                labels={'total_cost': 'Cost ($)', 'month': 'Month'},
+                                text=df_cur_monthly['total_cost'].apply(lambda x: f'${x:,.2f}')
+                            )
+                            fig_cur_trend.update_traces(textposition='outside', marker_line_width=0)
+                            fig_cur_trend.update_layout(showlegend=False, coloraxis_showscale=False)
+                            apply_chart_theme(fig_cur_trend)
+                            st.plotly_chart(fig_cur_trend, use_container_width=True)
+
+                        with col2:
+                            # Per-user cost from CUR
+                            query_cur_user = f"""
+                            SELECT
+                                line_item_resource_id as resource_id,
+                                SUM(line_item_unblended_cost) as total_cost
+                            FROM {CUR_DATABASE}."{cur_table}"
+                            WHERE line_item_product_code = 'Kiro'
+                            GROUP BY line_item_resource_id
+                            ORDER BY total_cost DESC
+                            LIMIT 15
+                            """
+                            df_cur_user = fetch_data(query_cur_user)
+                            df_cur_user['total_cost'] = df_cur_user['total_cost'].apply(safe_float)
+                            user_umap = get_usernames_batch(df_cur_user['resource_id'].unique().tolist())
+                            df_cur_user['user'] = df_cur_user['resource_id'].map(user_umap)
+
+                            fig_cur_user = px.bar(
+                                df_cur_user, x='user', y='total_cost',
+                                title='Top 15 Users by Billed Cost',
+                                color='total_cost', color_continuous_scale='Sunset',
+                                labels={'total_cost': 'Cost ($)', 'user': 'User'},
+                                text=df_cur_user['total_cost'].apply(lambda x: f'${x:,.2f}')
+                            )
+                            fig_cur_user.update_traces(textposition='outside', marker_line_width=0)
+                            fig_cur_user.update_layout(xaxis_tickangle=-45, showlegend=False, coloraxis_showscale=False)
+                            apply_chart_theme(fig_cur_user)
+                            st.plotly_chart(fig_cur_user, use_container_width=True)
+
+                        # Detailed CUR table
+                        st.subheader("📋 Detailed CUR Cost Breakdown")
+                        query_cur_detail = f"""
+                        SELECT
+                            line_item_resource_id as resource_id,
+                            DATE_FORMAT(bill_billing_period_start_date, '%Y-%m') as month,
+                            line_item_line_item_type as charge_type,
+                            SUM(line_item_unblended_cost) as cost
+                        FROM {CUR_DATABASE}."{cur_table}"
+                        WHERE line_item_product_code = 'Kiro'
+                        GROUP BY line_item_resource_id,
+                                 DATE_FORMAT(bill_billing_period_start_date, '%Y-%m'),
+                                 line_item_line_item_type
+                        ORDER BY month DESC, cost DESC
+                        """
+                        df_cur_detail = fetch_data(query_cur_detail)
+                        df_cur_detail['cost'] = df_cur_detail['cost'].apply(safe_float)
+                        detail_umap = get_usernames_batch(df_cur_detail['resource_id'].unique().tolist())
+                        df_cur_detail['User'] = df_cur_detail['resource_id'].map(detail_umap)
+                        df_cur_detail['Cost'] = df_cur_detail['cost'].apply(lambda x: f'${x:,.2f}')
+                        st.dataframe(
+                            df_cur_detail[['User', 'month', 'charge_type', 'Cost']].rename(
+                                columns={'month': 'Month', 'charge_type': 'Charge Type'}
+                            ),
+                            use_container_width=True, height=400, hide_index=True
+                        )
+
+                except Exception as e:
+                    st.warning(f"Could not query CUR data: {e}")
+                    st.info("Ensure the CUR Glue crawler has run and the table contains Kiro line items.")
+            else:
+                st.warning("No CUR table found. Run the CUR Glue crawler first.")
+
+            st.markdown("---")
+
+        # ── Estimated costs from credit usage (always available) ──
+        st.subheader("📐 Estimated Costs (from Credit Usage)")
+        st.caption("Calculated from subscription tier pricing + overage credits × $0.04/credit")
+
+        query_cost_est = f"""
+        SELECT
+            userid,
+            subscription_tier,
+            DATE_FORMAT(DATE_PARSE(date, '%Y-%m-%d'), '%Y-%m') as month,
+            SUM(TRY_CAST(credits_used AS DOUBLE)) as credits_used,
+            SUM(TRY_CAST(overage_credits_used AS DOUBLE)) as overage_credits
+        FROM {table_name}
+        GROUP BY userid, subscription_tier,
+                 DATE_FORMAT(DATE_PARSE(date, '%Y-%m-%d'), '%Y-%m')
+        ORDER BY month, userid
+        """
+        df_cost_est = fetch_data(query_cost_est)
+        df_cost_est['credits_used'] = df_cost_est['credits_used'].apply(safe_float)
+        df_cost_est['overage_credits'] = df_cost_est['overage_credits'].apply(safe_float)
+        df_cost_est['subscription_cost'] = df_cost_est['subscription_tier'].map(TIER_PRICING).fillna(0)
+        df_cost_est['overage_cost'] = df_cost_est['overage_credits'] * OVERAGE_COST_PER_CREDIT
+        df_cost_est['total_estimated_cost'] = df_cost_est['subscription_cost'] + df_cost_est['overage_cost']
+
+        umap_cost = get_usernames_batch(df_cost_est['userid'].unique().tolist())
+        df_cost_est['username'] = df_cost_est['userid'].map(umap_cost)
+
+        # Monthly totals
+        df_monthly_cost = df_cost_est.groupby('month').agg(
+            subscription_cost=('subscription_cost', 'sum'),
+            overage_cost=('overage_cost', 'sum'),
+            total_cost=('total_estimated_cost', 'sum'),
+            users=('userid', 'nunique')
+        ).reset_index().sort_values('month')
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Estimated Spend",
+                      f"${df_monthly_cost['total_cost'].sum():,.2f}",
+                      help="Sum of subscription fees + overage charges")
+        with col2:
+            st.metric("Total Subscription Fees",
+                      f"${df_monthly_cost['subscription_cost'].sum():,.2f}")
+        with col3:
+            st.metric("Total Overage Charges",
+                      f"${df_monthly_cost['overage_cost'].sum():,.2f}")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            fig_est_trend = go.Figure()
+            fig_est_trend.add_trace(go.Bar(
+                x=df_monthly_cost['month'], y=df_monthly_cost['subscription_cost'],
+                name='Subscription', marker_color='#4361ee'
+            ))
+            fig_est_trend.add_trace(go.Bar(
+                x=df_monthly_cost['month'], y=df_monthly_cost['overage_cost'],
+                name='Overage', marker_color='#f72585'
+            ))
+            fig_est_trend.update_layout(
+                title='Monthly Estimated Cost Breakdown',
+                barmode='stack',
+                yaxis_title='Cost ($)', xaxis_title='Month',
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+            )
+            apply_chart_theme(fig_est_trend)
+            st.plotly_chart(fig_est_trend, use_container_width=True)
+
+        with col2:
+            # Per-user estimated cost
+            df_user_cost = df_cost_est.groupby('username').agg(
+                total_cost=('total_estimated_cost', 'sum')
+            ).reset_index().sort_values('total_cost', ascending=False).head(15)
+
+            fig_user_cost = px.bar(
+                df_user_cost, x='username', y='total_cost',
+                title='Top 15 Users by Estimated Cost',
+                color='total_cost', color_continuous_scale='Sunset',
+                labels={'total_cost': 'Cost ($)', 'username': 'User'},
+                text=df_user_cost['total_cost'].apply(lambda x: f'${x:,.2f}')
+            )
+            fig_user_cost.update_traces(textposition='outside', marker_line_width=0)
+            fig_user_cost.update_layout(xaxis_tickangle=-45, showlegend=False, coloraxis_showscale=False)
+            apply_chart_theme(fig_user_cost)
+            st.plotly_chart(fig_user_cost, use_container_width=True)
+
+        # Detailed estimated cost table by user by month
+        st.subheader("📅 Estimated Cost by User by Month")
+        df_cost_pivot = df_cost_est.pivot_table(
+            index=['username', 'subscription_tier'],
+            columns='month',
+            values='total_estimated_cost',
+            aggfunc='sum', fill_value=0
+        )
+        df_cost_pivot = df_cost_pivot[sorted(df_cost_pivot.columns)]
+        df_cost_pivot['Total'] = df_cost_pivot.sum(axis=1)
+        df_cost_pivot = df_cost_pivot.sort_values('Total', ascending=False)
+        df_cost_pivot = df_cost_pivot.round(2)
+        # Format as dollars
+        df_cost_display = df_cost_pivot.map(lambda x: f'${x:,.2f}')
+        st.dataframe(df_cost_display, use_container_width=True, height=400)
+
+        st.markdown("---")
+
         # ── Subscription Tier Breakdown ──
         st.header("🎫 Subscription Tier Breakdown")
 
@@ -826,6 +1093,52 @@ def main():
             for _, row in pie_data.iterrows():
                 pct = (row['Count'] / pie_data['Count'].sum() * 100)
                 st.metric(row['Category'], f"{row['Count']} users", f"{pct:.1f}%")
+
+        # ── Actionable Recommendations ──
+        st.markdown("---")
+        st.subheader("💡 Recommendations")
+
+        idle_users = df_users[df_users['category'] == 'Idle Users']
+        light_users = df_users[df_users['category'] == 'Light Users']
+        power_users_df = df_users[df_users['category'] == 'Power Users']
+
+        if len(idle_users) > 0:
+            idle_names = ", ".join(idle_users['username'].tolist()[:10])
+            st.warning(
+                f"**🎯 Enablement opportunity:** {len(idle_users)} user(s) have no recorded activity — "
+                f"{idle_names}. "
+                f"Consider scheduling Kiro workshops, pairing sessions, or sharing the "
+                f"[Kiro getting started guide](https://kiro.dev/docs/) to drive adoption."
+            )
+
+        if len(light_users) > 0:
+            light_names = ", ".join(light_users['username'].tolist()[:10])
+            st.info(
+                f"**📈 Growth potential:** {len(light_users)} light user(s) could benefit from deeper engagement — "
+                f"{light_names}. "
+                f"Tips: introduce Specs for structured development, set up steering files for team standards, "
+                f"or run a hands-on session showing advanced features."
+            )
+
+        # Tier optimization (for users with overages)
+        df_overage_users = df_credits[df_credits['total_overage'] > 0]
+        if len(df_overage_users) > 0:
+            for _, row in df_overage_users.iterrows():
+                current_tier = None
+                # Find user's tier from cost estimate data
+                user_tier_data = df_cost_est[df_cost_est['username'] == row['username']]
+                if not user_tier_data.empty:
+                    current_tier = user_tier_data.iloc[0]['subscription_tier']
+                overage_cost = row['total_overage'] * OVERAGE_COST_PER_CREDIT
+                if current_tier and overage_cost > 10:
+                    next_tier = 'PROPLUS' if current_tier in ('PRO', 'Pro') else 'POWER'
+                    next_price = TIER_PRICING.get(next_tier, 0)
+                    current_price = TIER_PRICING.get(current_tier, 0)
+                    st.success(
+                        f"**💰 Tier optimization:** {row['username']} is on {current_tier} with "
+                        f"${overage_cost:,.2f} in overage charges. "
+                        f"Upgrading to {next_tier} (${next_price}/mo) could save on overages."
+                    )
 
         st.markdown("---")
 

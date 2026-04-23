@@ -14,6 +14,21 @@ ATHENA_OUTPUT_BUCKET = os.getenv('ATHENA_OUTPUT_BUCKET', '')
 GLUE_TABLE_NAME = os.getenv('GLUE_TABLE_NAME', '')
 IDENTITY_STORE_ID = os.getenv('IDENTITY_STORE_ID', '')
 
+# CUR Integration (optional)
+CUR_DATABASE = os.getenv('CUR_DATABASE', '')
+CUR_ENABLED = os.getenv('CUR_ENABLED', 'false').lower() == 'true'
+
+# Kiro tier pricing (monthly subscription cost in USD)
+TIER_PRICING = {
+    'Pro': 20.0,
+    'PRO': 20.0,
+    'ProPlus': 40.0,
+    'PROPLUS': 40.0,
+    'Power': 200.0,
+    'POWER': 200.0,
+}
+OVERAGE_COST_PER_CREDIT = 0.04
+
 # Streamlit Configuration
 PAGE_TITLE = "Kiro Users Report"
 PAGE_ICON = "⚡"

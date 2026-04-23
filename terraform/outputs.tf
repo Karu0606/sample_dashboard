@@ -27,3 +27,14 @@ output "s3_data_path" {
   description = "Full S3 data path including account ID and region"
   value       = "s3://${local.s3_data_path}/"
 }
+
+
+output "cur_glue_database_name" {
+  description = "Name of the CUR Glue database"
+  value       = var.cur_s3_bucket_name != "" ? aws_glue_catalog_database.cur_db[0].name : ""
+}
+
+output "cur_enabled" {
+  description = "Whether CUR integration is enabled"
+  value       = var.cur_s3_bucket_name != "" ? "true" : "false"
+}

@@ -37,6 +37,18 @@ variable "identity_store_id" {
   type        = string
 }
 
+variable "cur_s3_bucket_name" {
+  description = "S3 bucket name for CUR v2 data (e.g. my-cur-bucket/cur-prefix). Leave empty to skip CUR integration."
+  type        = string
+  default     = ""
+}
+
+variable "cur_glue_database_name" {
+  description = "Glue database name for CUR data"
+  type        = string
+  default     = "kiro_cur_analytics"
+}
+
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)

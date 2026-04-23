@@ -1094,6 +1094,52 @@ def main():
                 pct = (row['Count'] / pie_data['Count'].sum() * 100)
                 st.metric(row['Category'], f"{row['Count']} users", f"{pct:.1f}%")
 
+        # ── Actionable Recommendations ──
+        st.markdown("---")
+        st.subheader("💡 Recommendations")
+
+        idle_users = df_users[df_users['category'] == 'Idle Users']
+        light_users = df_users[df_users['category'] == 'Light Users']
+        power_users_df = df_users[df_users['category'] == 'Power Users']
+
+        if len(idle_users) > 0:
+            idle_names = ", ".join(idle_users['username'].tolist()[:10])
+            st.warning(
+                f"**🎯 Enablement opportunity:** {len(idle_users)} user(s) have no recorded activity — "
+                f"{idle_names}. "
+                f"Consider scheduling Kiro workshops, pairing sessions, or sharing the "
+                f"[Kiro getting started guide](https://kiro.dev/docs/) to drive adoption."
+            )
+
+        if len(light_users) > 0:
+            light_names = ", ".join(light_users['username'].tolist()[:10])
+            st.info(
+                f"**📈 Growth potential:** {len(light_users)} light user(s) could benefit from deeper engagement — "
+                f"{light_names}. "
+                f"Tips: introduce Specs for structured development, set up steering files for team standards, "
+                f"or run a hands-on session showing advanced features."
+            )
+
+        # Tier optimization (for users with overages)
+        df_overage_users = df_credits[df_credits['total_overage'] > 0]
+        if len(df_overage_users) > 0:
+            for _, row in df_overage_users.iterrows():
+                current_tier = None
+                # Find user's tier from cost estimate data
+                user_tier_data = df_cost_est[df_cost_est['username'] == row['username']]
+                if not user_tier_data.empty:
+                    current_tier = user_tier_data.iloc[0]['subscription_tier']
+                overage_cost = row['total_overage'] * OVERAGE_COST_PER_CREDIT
+                if current_tier and overage_cost > 10:
+                    next_tier = 'PROPLUS' if current_tier in ('PRO', 'Pro') else 'POWER'
+                    next_price = TIER_PRICING.get(next_tier, 0)
+                    current_price = TIER_PRICING.get(current_tier, 0)
+                    st.success(
+                        f"**💰 Tier optimization:** {row['username']} is on {current_tier} with "
+                        f"${overage_cost:,.2f} in overage charges. "
+                        f"Upgrading to {next_tier} (${next_price}/mo) could save on overages."
+                    )
+
         st.markdown("---")
 
         # ── User Activity Timeline ──

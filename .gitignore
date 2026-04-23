@@ -25,3 +25,9 @@ app/venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Synthetic test data
+synthetic_data/
+generate_synthetic_data.py
+upload_synthetic_cur.py
+inject_synthetic_cur.py

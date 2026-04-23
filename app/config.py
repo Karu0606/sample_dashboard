@@ -21,8 +21,11 @@ CUR_ENABLED = os.getenv('CUR_ENABLED', 'false').lower() == 'true'
 # Kiro tier pricing (monthly subscription cost in USD)
 TIER_PRICING = {
     'Pro': 20.0,
+    'PRO': 20.0,
     'ProPlus': 40.0,
+    'PROPLUS': 40.0,
     'Power': 200.0,
+    'POWER': 200.0,
 }
 OVERAGE_COST_PER_CREDIT = 0.04
 

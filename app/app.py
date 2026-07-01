@@ -10,6 +10,7 @@ import boto3
 from datetime import datetime
 import time
 from config import *
+from athena_utils import collect_query_results
 
 # Hide deploy button
 os.environ['STREAMLIT_SERVER_ENABLE_STATIC_SERVING'] = 'false'
@@ -185,11 +186,7 @@ def execute_athena_query(query):
 def fetch_data(query):
     client = get_athena_client()
     qid = execute_athena_query(query)
-    result = client.get_query_results(QueryExecutionId=qid)
-    columns = [col['Label'] for col in result['ResultSet']['ResultSetMetadata']['ColumnInfo']]
-    rows = []
-    for row in result['ResultSet']['Rows'][1:]:
-        rows.append([field.get('VarCharValue', '') for field in row['Data']])
+    columns, rows = collect_query_results(client, qid)
     return pd.DataFrame(rows, columns=columns)
 
 # --- Theme helpers ---

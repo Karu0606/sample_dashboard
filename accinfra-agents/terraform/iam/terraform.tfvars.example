@@ -1,0 +1,19 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# AccInfra IAM — Example Variables (copy to terraform.tfvars and fill in)
+# ──────────────────────────────────────────────────────────────────────────────
+
+aws_region = "ap-southeast-1"
+environment = "production"
+
+# The ARN of the principal that will assume the agent role.
+# For Kiro Crew on EC2: use the EC2 instance role ARN
+# For local dev: use your IAM user ARN
+kiro_crew_instance_role_arn = "arn:aws:iam::123456789012:role/kirocrew-ec2-kirocrew"
+
+# Terraform remote state
+terraform_state_bucket = "accinfra-tfstate-123456789012"
+terraform_state_key    = "infra/terraform.tfstate"
+terraform_lock_table   = "accinfra-tfstate-lock"
+
+# GitHub repo for OIDC trust (deploy role)
+github_repo = "Karu0606/sample_dashboard"

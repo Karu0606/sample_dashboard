@@ -1,0 +1,11 @@
+{
+  "name": "accinfra-deploy-closer",
+  "description": "Watches merged infra PRs, checks deployment status, closes issues with resource details",
+  "schedule": "*/10 * * * *",
+  "type": "script",
+  "command": "python agents/deploy-closer/run.py",
+  "working_directory": "accinfra-agents",
+  "enabled": true,
+  "timeout_seconds": 90,
+  "retry_on_failure": false
+}

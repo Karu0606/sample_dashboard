@@ -1,0 +1,11 @@
+{
+  "name": "accinfra-issue-watcher",
+  "description": "Polls GitHub for new issues with 'accinfra:' prefix and triages them",
+  "schedule": "*/5 * * * *",
+  "type": "script",
+  "command": "python agents/issue-watcher/run.py",
+  "working_directory": "accinfra-agents",
+  "enabled": true,
+  "timeout_seconds": 60,
+  "retry_on_failure": false
+}

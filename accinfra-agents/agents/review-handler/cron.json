@@ -1,0 +1,11 @@
+{
+  "name": "accinfra-review-handler",
+  "description": "Watches open infra PRs for reviewer feedback, applies corrections, re-submits for review",
+  "schedule": "*/10 * * * *",
+  "type": "script",
+  "command": "python agents/review-handler/run.py",
+  "working_directory": "accinfra-agents",
+  "enabled": true,
+  "timeout_seconds": 90,
+  "retry_on_failure": false
+}

@@ -1,0 +1,120 @@
+{
+  "_comment": "AccInfra Agents - Client-Adaptable Configuration. Swap values per client/account.",
+
+  "github": {
+    "repo_owner": "Karu0606",
+    "repo_name": "sample_dashboard",
+    "app_id": "",
+    "app_installation_id": "",
+    "app_private_key_path": "~/.kiro/crew/accinfra-github-app.pem",
+    "issue_prefix": "accinfra:",
+    "labels": {
+      "triaged": "infra-automation/triaged",
+      "in_progress": "infra-automation/in-progress",
+      "awaiting_review": "infra-automation/awaiting-review",
+      "deployed": "infra-automation/deployed",
+      "failed": "infra-automation/failed"
+    },
+    "approver_username": "Karu0606",
+    "branch_prefix": "infra/issue-"
+  },
+
+  "aws": {
+    "region": "us-east-1",
+    "agent_role_arn": "arn:aws:iam::027378719919:role/accinfra-agent-role",
+    "terraform_state_bucket": "accinfra-tfstate-027378719919",
+    "terraform_state_key": "infra/terraform.tfstate",
+    "terraform_lock_table": "accinfra-tfstate-lock",
+    "cloudwatch_log_group_prefix": "/kirocrew/accinfra"
+  },
+
+  "notifications": {
+    "_comment": "Leave webhook_url empty to disable notifications. Supports Slack and Teams.",
+    "slack_webhook_url": "",
+    "teams_webhook_url": "",
+    "notify_on": ["error", "escalation"],
+    "channel_name": "#accinfra-alerts"
+  },
+
+  "agents": {
+    "issue_watcher": {
+      "cron_interval_minutes": 5,
+      "enabled": true
+    },
+    "solution_architect": {
+      "enabled": true,
+      "max_similar_issues_to_search": 20,
+      "infra_checks": [
+        "vpc_limit",
+        "iam_roles_limit",
+        "iam_users_limit",
+        "subnet_availability",
+        "elastic_ip_limit",
+        "security_group_limit",
+        "nat_gateway_limit"
+      ]
+    },
+    "review_handler": {
+      "cron_interval_minutes": 10,
+      "enabled": true,
+      "max_revision_cycles": 3,
+      "escalation_message": "This PR has exceeded the maximum automated revision cycles. Human intervention required."
+    },
+    "deploy_closer": {
+      "cron_interval_minutes": 10,
+      "enabled": true
+    }
+  },
+
+  "terraform": {
+    "working_directory": "infrastructure",
+    "backend_type": "s3",
+    "required_providers": {
+      "aws": ">= 5.0"
+    },
+    "default_tags": {
+      "ManagedBy": "accinfra-agents",
+      "Environment": "demo",
+      "Project": "accinfra"
+    }
+  },
+
+  "security": {
+    "require_approval_before_apply": true,
+    "allowed_terraform_resources": [
+      "aws_vpc",
+      "aws_subnet",
+      "aws_security_group",
+      "aws_iam_role",
+      "aws_iam_policy",
+      "aws_iam_role_policy_attachment",
+      "aws_nat_gateway",
+      "aws_internet_gateway",
+      "aws_route_table",
+      "aws_route_table_association",
+      "aws_eip",
+      "aws_ecs_cluster",
+      "aws_ecs_service",
+      "aws_ecs_task_definition",
+      "aws_ecr_repository",
+      "aws_lb",
+      "aws_lb_target_group",
+      "aws_lb_listener",
+      "aws_s3_bucket",
+      "aws_s3_bucket_versioning",
+      "aws_s3_bucket_server_side_encryption_configuration",
+      "aws_s3_bucket_public_access_block",
+      "aws_dynamodb_table",
+      "aws_cloudwatch_log_group",
+      "aws_cloudwatch_metric_alarm",
+      "aws_lambda_function",
+      "aws_lambda_permission"
+    ],
+    "blocked_terraform_resources": [
+      "aws_iam_user",
+      "aws_iam_access_key",
+      "aws_organizations_account",
+      "aws_kms_key"
+    ]
+  }
+}

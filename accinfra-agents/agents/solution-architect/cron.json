@@ -1,0 +1,11 @@
+{
+  "name": "accinfra-solution-architect",
+  "description": "Processes triaged issues: searches existing solutions, checks infra feasibility, generates Terraform, opens PR",
+  "schedule": "*/5 * * * *",
+  "type": "script",
+  "command": "python agents/solution-architect/run.py",
+  "working_directory": "accinfra-agents",
+  "enabled": true,
+  "timeout_seconds": 120,
+  "retry_on_failure": false
+}

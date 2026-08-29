@@ -1,0 +1,116 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AccInfra Issue #12 - One-shot Lambda Health Check (google.com)'
+
+Parameters:
+  VpcId:
+    Type: String
+    Default: vpc-03d965dd721f6acfd
+    Description: Existing VPC from Issue #9
+  SubnetId:
+    Type: String
+    Default: subnet-0f2a47d04d3c3e2b8
+    Description: Public subnet from Issue #9
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: accinfra-role-issue-12
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Tags:
+        - Key: project
+          Value: accinfra
+        - Key: issue
+          Value: '12'
+        - Key: managed-by
+          Value: kirocrew
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for accinfra-issue-12 Lambda
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS outbound for health check
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP outbound for health check
+      Tags:
+        - Key: project
+          Value: accinfra
+        - Key: issue
+          Value: '12'
+        - Key: managed-by
+          Value: kirocrew
+
+  HealthCheckFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: accinfra-issue-12-health-check
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 128
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref SubnetId
+      Tags:
+        - Key: project
+          Value: accinfra
+        - Key: issue
+          Value: '12'
+        - Key: managed-by
+          Value: kirocrew
+      Code:
+        ZipFile: |
+          import urllib.request
+          import json
+          from datetime import datetime, timezone
+
+          def handler(event, context):
+              url = "https://www.google.com"
+              try:
+                  req = urllib.request.Request(url, method="HEAD")
+                  with urllib.request.urlopen(req, timeout=10) as resp:
+                      status = resp.status
+                      healthy = 200 <= status < 400
+              except Exception as e:
+                  status = 0
+                  healthy = False
+
+              result = {
+                  "url": url,
+                  "status_code": status,
+                  "healthy": healthy,
+                  "checked_at": datetime.now(timezone.utc).isoformat(),
+              }
+              print(json.dumps(result))
+              return result
+
+Outputs:
+  LambdaFunctionArn:
+    Description: Health Check Lambda ARN
+    Value: !GetAtt HealthCheckFunction.Arn
+  LambdaFunctionName:
+    Description: Health Check Lambda Function Name
+    Value: !Ref HealthCheckFunction
+  SecurityGroupId:
+    Description: Lambda Security Group ID
+    Value: !Ref LambdaSecurityGroup

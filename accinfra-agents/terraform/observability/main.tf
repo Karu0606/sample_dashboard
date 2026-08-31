@@ -96,7 +96,7 @@ resource "aws_cloudwatch_log_metric_filter" "agent_errors" {
     namespace = "AccInfra/Agents"
     value     = "1"
     dimensions = {
-      AgentName = each.key
+      AgentName = "$.agent"
     }
   }
 }
@@ -113,7 +113,7 @@ resource "aws_cloudwatch_log_metric_filter" "agent_escalations" {
     namespace = "AccInfra/Agents"
     value     = "1"
     dimensions = {
-      AgentName = each.key
+      AgentName = "$.agent"
     }
   }
 }
@@ -130,7 +130,7 @@ resource "aws_cloudwatch_log_metric_filter" "agent_success" {
     namespace = "AccInfra/Agents"
     value     = "1"
     dimensions = {
-      AgentName = each.key
+      AgentName = "$.agent"
     }
   }
 }

@@ -10,6 +10,8 @@ Behavior:
 - If no webhook URL is set, notification is silently skipped.
 """
 
+from __future__ import annotations
+
 import json
 import time
 import urllib.request
@@ -71,11 +73,13 @@ class AgentLogger:
         if "ACCOUNT_ID" in role_arn:
             return boto3.client("logs", region_name=region)
 
+        external_id = self.aws_config.get("external_id", "accinfra-agents")
         sts = boto3.client("sts", region_name=region)
         assumed = sts.assume_role(
             RoleArn=role_arn,
             RoleSessionName=f"accinfra-{self.agent_name}",
             DurationSeconds=3600,
+            ExternalId=external_id,
         )
         creds = assumed["Credentials"]
         return boto3.client(

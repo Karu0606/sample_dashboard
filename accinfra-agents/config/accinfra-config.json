@@ -22,6 +22,7 @@
   "aws": {
     "region": "us-east-1",
     "agent_role_arn": "arn:aws:iam::027378719919:role/accinfra-agent-role",
+    "external_id": "accinfra-agents",
     "terraform_state_bucket": "accinfra-tfstate-027378719919",
     "terraform_state_key": "infra/terraform.tfstate",
     "terraform_lock_table": "accinfra-tfstate-lock",

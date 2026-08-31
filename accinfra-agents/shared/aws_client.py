@@ -5,6 +5,8 @@ Handles AWS STS role assumption and provides service clients.
 All agents use this for secure, least-privilege AWS access.
 """
 
+from __future__ import annotations
+
 from typing import Any
 
 import boto3
@@ -32,6 +34,8 @@ class AWSClient:
         self.aws_config = config["aws"]
         self.region = self.aws_config["region"]
         self.role_arn = self.aws_config["agent_role_arn"]
+        # ExternalId must match the trust policy condition on accinfra-agent-role.
+        self.external_id = self.aws_config.get("external_id", "accinfra-agents")
         self.session_name = session_name
 
         self._credentials = self._assume_role()
@@ -52,6 +56,7 @@ class AWSClient:
                 RoleArn=self.role_arn,
                 RoleSessionName=self.session_name,
                 DurationSeconds=3600,
+                ExternalId=self.external_id,
             )
             return {
                 "aws_access_key_id": response["Credentials"]["AccessKeyId"],

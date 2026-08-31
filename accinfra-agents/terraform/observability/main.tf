@@ -92,10 +92,9 @@ resource "aws_cloudwatch_log_metric_filter" "agent_errors" {
   pattern        = "{ $.status = \"ERROR\" }"
 
   metric_transformation {
-    name          = "AgentErrors"
-    namespace     = "AccInfra/Agents"
-    value         = "1"
-    default_value = "0"
+    name      = "AgentErrors"
+    namespace = "AccInfra/Agents"
+    value     = "1"
     dimensions = {
       AgentName = each.key
     }
@@ -110,10 +109,9 @@ resource "aws_cloudwatch_log_metric_filter" "agent_escalations" {
   pattern        = "{ $.status = \"ESCALATION\" }"
 
   metric_transformation {
-    name          = "AgentEscalations"
-    namespace     = "AccInfra/Agents"
-    value         = "1"
-    default_value = "0"
+    name      = "AgentEscalations"
+    namespace = "AccInfra/Agents"
+    value     = "1"
     dimensions = {
       AgentName = each.key
     }
@@ -128,10 +126,9 @@ resource "aws_cloudwatch_log_metric_filter" "agent_success" {
   pattern        = "{ $.status = \"OK\" }"
 
   metric_transformation {
-    name          = "AgentSuccess"
-    namespace     = "AccInfra/Agents"
-    value         = "1"
-    default_value = "0"
+    name      = "AgentSuccess"
+    namespace = "AccInfra/Agents"
+    value     = "1"
     dimensions = {
       AgentName = each.key
     }

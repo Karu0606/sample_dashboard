@@ -19,7 +19,11 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 5.0"
+      # Pinned to a bounded pessimistic range (reviewer feedback on PR #20):
+      # ">= 5.0" was open-ended and would silently pull a future 6.x major that
+      # could break the plan. "~> 5.0" allows 5.x minor/patch upgrades but stays
+      # within major version 5, keeping deployments reproducible and upgrade-safe.
+      version = "~> 5.0"
     }
   }
 }

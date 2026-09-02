@@ -1,0 +1,34 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AccInfra Issue #16 - Auto-generated'
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'accinfra-issue-16-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: project
+          Value: accinfra
+        - Key: issue
+          Value: '16'
+        - Key: managed-by
+          Value: kirocrew
+
+Outputs:
+  BucketName:
+    Description: S3 Bucket Name
+    Value: !Ref S3Bucket
+  BucketArn:
+    Description: S3 Bucket ARN
+    Value: !GetAtt S3Bucket.Arn
